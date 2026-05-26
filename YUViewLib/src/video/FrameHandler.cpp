@@ -32,6 +32,7 @@
 
 #include "FrameHandler.h"
 
+#include <QImageReader>
 #include <QPainter>
 
 #include <common/FunctionsGui.h>
@@ -192,13 +193,37 @@ bool FrameHandler::loadCurrentImageFromFile(const QString &filePath)
   }
   else
   {
-    // Load the image and return if loading was successful
-    this->currentImage = QImage(filePath);
+    // Load the image using QImageReader which preserves the original bit depth
+    QImageReader reader(filePath);
+    reader.setAutoTransform(true);
+    this->currentImage = reader.read();
     auto qFrameSize    = currentImage.size();
     this->setFrameSize(Size(qFrameSize.width(), qFrameSize.height()));
   }
 
   return (!this->currentImage.isNull());
+}
+
+int FrameHandler::getImageBitDepthPerChannel() const
+{
+  if (currentImage.isNull())
+    return 0;
+
+  switch (currentImage.format())
+  {
+  case QImage::Format_RGBX64:
+  case QImage::Format_RGBA64:
+  case QImage::Format_RGBA64_Premultiplied:
+  case QImage::Format_Grayscale16:
+    return 16;
+  default:
+    return 8;
+  }
+}
+
+bool FrameHandler::isHighBitDepthImage() const
+{
+  return getImageBitDepthPerChannel() > 8;
 }
 
 void FrameHandler::savePlaylist(YUViewDomElement &element) const
@@ -327,42 +352,88 @@ void FrameHandler::drawPixelValues(QPainter *painter,
 
       // Get the text to show
       bool      drawWhite = false;
-      QRgb      pixVal;
       QString   valText;
       const int formatBase = settings.value("ShowPixelValuesHex").toBool() ? 16 : 10;
       if (item2 != nullptr)
       {
-        auto pixel1 = getPixelVal(x, y);
-        auto pixel2 = item2->getPixelVal(x, y);
+        if (isHighBitDepthImage() || (item2 && item2->isHighBitDepthImage()))
+        {
+          auto pixel1 = getPixelVal64(x, y);
+          auto pixel2 = item2->getPixelVal64(x, y);
 
-        int dR = int(qRed(pixel1)) - int(qRed(pixel2));
-        int dG = int(qGreen(pixel1)) - int(qGreen(pixel2));
-        int dB = int(qBlue(pixel1)) - int(qBlue(pixel2));
+          int dR = int(pixel1.red()) - int(pixel2.red());
+          int dG = int(pixel1.green()) - int(pixel2.green());
+          int dB = int(pixel1.blue()) - int(pixel2.blue());
 
-        const QString RString = ((dR < 0) ? "-" : "") + QString::number(std::abs(dR), formatBase);
-        const QString GString = ((dG < 0) ? "-" : "") + QString::number(std::abs(dG), formatBase);
-        const QString BString = ((dB < 0) ? "-" : "") + QString::number(std::abs(dB), formatBase);
+          const QString RString =
+              ((dR < 0) ? "-" : "") + QString::number(std::abs(dR), formatBase);
+          const QString GString =
+              ((dG < 0) ? "-" : "") + QString::number(std::abs(dG), formatBase);
+          const QString BString =
+              ((dB < 0) ? "-" : "") + QString::number(std::abs(dB), formatBase);
 
-        if (markDifference)
-          drawWhite = (dR == 0 && dG == 0 && dB == 0);
+          if (markDifference)
+            drawWhite = (dR == 0 && dG == 0 && dB == 0);
+          else
+          {
+            int r     = functions::clip(32768 + dR, 0, 65535) >> 8;
+            int g     = functions::clip(32768 + dG, 0, 65535) >> 8;
+            int b     = functions::clip(32768 + dB, 0, 65535) >> 8;
+            drawWhite = (r < 128 && g < 128 && b < 128);
+          }
+          valText = QString("R%1\nG%2\nB%3").arg(RString, GString, BString);
+        }
         else
         {
-          int r     = functions::clip(128 + dR, 0, 255);
-          int g     = functions::clip(128 + dG, 0, 255);
-          int b     = functions::clip(128 + dB, 0, 255);
-          pixVal    = qRgb(r, g, b);
-          drawWhite = (qRed(pixVal) < 128 && qGreen(pixVal) < 128 && qBlue(pixVal) < 128);
+          auto pixel1 = getPixelVal(x, y);
+          auto pixel2 = item2->getPixelVal(x, y);
+
+          int dR = int(qRed(pixel1)) - int(qRed(pixel2));
+          int dG = int(qGreen(pixel1)) - int(qGreen(pixel2));
+          int dB = int(qBlue(pixel1)) - int(qBlue(pixel2));
+
+          const QString RString =
+              ((dR < 0) ? "-" : "") + QString::number(std::abs(dR), formatBase);
+          const QString GString =
+              ((dG < 0) ? "-" : "") + QString::number(std::abs(dG), formatBase);
+          const QString BString =
+              ((dB < 0) ? "-" : "") + QString::number(std::abs(dB), formatBase);
+
+          if (markDifference)
+            drawWhite = (dR == 0 && dG == 0 && dB == 0);
+          else
+          {
+            QRgb pixVal;
+            int  r = functions::clip(128 + dR, 0, 255);
+            int  g = functions::clip(128 + dG, 0, 255);
+            int  b = functions::clip(128 + dB, 0, 255);
+            pixVal    = qRgb(r, g, b);
+            drawWhite = (qRed(pixVal) < 128 && qGreen(pixVal) < 128 && qBlue(pixVal) < 128);
+          }
+          valText = QString("R%1\nG%2\nB%3").arg(RString, GString, BString);
         }
-        valText = QString("R%1\nG%2\nB%3").arg(RString, GString, BString);
       }
       else
       {
-        pixVal    = getPixelVal(x, y);
-        drawWhite = (qRed(pixVal) < 128 && qGreen(pixVal) < 128 && qBlue(pixVal) < 128);
-        valText   = QString("R%1\nG%2\nB%3")
-                      .arg(qRed(pixVal), 0, formatBase)
-                      .arg(qGreen(pixVal), 0, formatBase)
-                      .arg(qBlue(pixVal), 0, formatBase);
+        if (isHighBitDepthImage())
+        {
+          auto pixVal64 = getPixelVal64(x, y);
+          drawWhite     = (pixVal64.red() < 32768 && pixVal64.green() < 32768 &&
+                       pixVal64.blue() < 32768);
+          valText       = QString("R%1\nG%2\nB%3")
+                        .arg(pixVal64.red(), 0, formatBase)
+                        .arg(pixVal64.green(), 0, formatBase)
+                        .arg(pixVal64.blue(), 0, formatBase);
+        }
+        else
+        {
+          auto pixVal = getPixelVal(x, y);
+          drawWhite   = (qRed(pixVal) < 128 && qGreen(pixVal) < 128 && qBlue(pixVal) < 128);
+          valText     = QString("R%1\nG%2\nB%3")
+                        .arg(qRed(pixVal), 0, formatBase)
+                        .arg(qGreen(pixVal), 0, formatBase)
+                        .arg(qBlue(pixVal), 0, formatBase);
+        }
       }
 
       painter->setPen(drawWhite ? Qt::white : Qt::black);
@@ -386,16 +457,29 @@ QImage FrameHandler::calculateDifference(FrameHandler *item2,
   // Also calculate the MSE while we're at it (R,G,B)
   int64_t mseAdd[3] = {0, 0, 0};
 
+  const bool highBitDepth = isHighBitDepthImage() || item2->isHighBitDepthImage();
+
   for (unsigned y = 0; y < height; y++)
   {
     for (unsigned x = 0; x < width; x++)
     {
-      auto pixel1 = getPixelVal(x, y);
-      auto pixel2 = item2->getPixelVal(x, y);
-
-      int dR = int(qRed(pixel1)) - int(qRed(pixel2));
-      int dG = int(qGreen(pixel1)) - int(qGreen(pixel2));
-      int dB = int(qBlue(pixel1)) - int(qBlue(pixel2));
+      int dR, dG, dB;
+      if (highBitDepth)
+      {
+        auto pixel1 = getPixelVal64(x, y);
+        auto pixel2 = item2->getPixelVal64(x, y);
+        dR = int(pixel1.red()) - int(pixel2.red());
+        dG = int(pixel1.green()) - int(pixel2.green());
+        dB = int(pixel1.blue()) - int(pixel2.blue());
+      }
+      else
+      {
+        auto pixel1 = getPixelVal(x, y);
+        auto pixel2 = item2->getPixelVal(x, y);
+        dR = int(qRed(pixel1)) - int(qRed(pixel2));
+        dG = int(qGreen(pixel1)) - int(qGreen(pixel2));
+        dB = int(qBlue(pixel1)) - int(qBlue(pixel2));
+      }
 
       int r, g, b;
       if (markDifference)
@@ -403,6 +487,13 @@ QImage FrameHandler::calculateDifference(FrameHandler *item2,
         r = (dR != 0) ? 255 : 0;
         g = (dG != 0) ? 255 : 0;
         b = (dB != 0) ? 255 : 0;
+      }
+      else if (highBitDepth)
+      {
+        // Scale 16-bit differences to 8-bit display range
+        r = functions::clip(128 + (dR * amplificationFactor >> 8), 0, 255);
+        g = functions::clip(128 + (dG * amplificationFactor >> 8), 0, 255);
+        b = functions::clip(128 + (dB * amplificationFactor >> 8), 0, 255);
       }
       else if (amplificationFactor != 1)
       {
@@ -417,9 +508,9 @@ QImage FrameHandler::calculateDifference(FrameHandler *item2,
         b = functions::clip(128 + dB, 0, 255);
       }
 
-      mseAdd[0] += dR * dR;
-      mseAdd[1] += dG * dG;
-      mseAdd[2] += dB * dB;
+      mseAdd[0] += (int64_t)dR * dR;
+      mseAdd[1] += (int64_t)dG * dG;
+      mseAdd[2] += (int64_t)dB * dB;
 
       auto val = qRgb(r, g, b);
       diffImg.setPixel(x, y, val);
@@ -491,27 +582,56 @@ QStringPairList FrameHandler::getPixelValues(const QPoint &pixelPos,
   // Get the RGB values from the image
   QStringPairList values;
 
+  const bool highBitDepth = isHighBitDepthImage() || (item2 && item2->isHighBitDepthImage());
+
   if (item2)
   {
     // There is a second item. Return the difference values.
-    auto pixel1 = this->getPixelVal(pixelPos);
-    auto pixel2 = item2->getPixelVal(pixelPos);
+    if (highBitDepth)
+    {
+      auto pixel1 = this->getPixelVal64(pixelPos);
+      auto pixel2 = item2->getPixelVal64(pixelPos);
 
-    int r = int(qRed(pixel1)) - int(qRed(pixel2));
-    int g = int(qGreen(pixel1)) - int(qGreen(pixel2));
-    int b = int(qBlue(pixel1)) - int(qBlue(pixel2));
+      int r = int(pixel1.red()) - int(pixel2.red());
+      int g = int(pixel1.green()) - int(pixel2.green());
+      int b = int(pixel1.blue()) - int(pixel2.blue());
 
-    values.append(QStringPair("R", QString::number(r)));
-    values.append(QStringPair("G", QString::number(g)));
-    values.append(QStringPair("B", QString::number(b)));
+      values.append(QStringPair("R", QString::number(r)));
+      values.append(QStringPair("G", QString::number(g)));
+      values.append(QStringPair("B", QString::number(b)));
+    }
+    else
+    {
+      auto pixel1 = this->getPixelVal(pixelPos);
+      auto pixel2 = item2->getPixelVal(pixelPos);
+
+      int r = int(qRed(pixel1)) - int(qRed(pixel2));
+      int g = int(qGreen(pixel1)) - int(qGreen(pixel2));
+      int b = int(qBlue(pixel1)) - int(qBlue(pixel2));
+
+      values.append(QStringPair("R", QString::number(r)));
+      values.append(QStringPair("G", QString::number(g)));
+      values.append(QStringPair("B", QString::number(b)));
+    }
   }
   else
   {
-    // No second item. Return the RGB values of this item.
-    auto val = getPixelVal(pixelPos);
-    values.append(QStringPair("R", QString::number(qRed(val))));
-    values.append(QStringPair("G", QString::number(qGreen(val))));
-    values.append(QStringPair("B", QString::number(qBlue(val))));
+    if (highBitDepth)
+    {
+      // Return 16-bit RGB values
+      auto val = getPixelVal64(pixelPos);
+      values.append(QStringPair("R", QString::number(val.red())));
+      values.append(QStringPair("G", QString::number(val.green())));
+      values.append(QStringPair("B", QString::number(val.blue())));
+    }
+    else
+    {
+      // No second item. Return the RGB values of this item.
+      auto val = getPixelVal(pixelPos);
+      values.append(QStringPair("R", QString::number(qRed(val))));
+      values.append(QStringPair("G", QString::number(qGreen(val))));
+      values.append(QStringPair("B", QString::number(qBlue(val))));
+    }
   }
 
   return values;

@@ -39,6 +39,7 @@
 
 #include <QImage>
 #include <QObject>
+#include <QRgba64>
 #include <QSettings>
 #include <string>
 
@@ -65,6 +66,12 @@ public:
   // Get the size/bit depth of the (current) frame
   Size getFrameSize() const { return frameSize; }
   int  getImageBitDepth() const { return currentImage.depth(); }
+
+  // Get the per-channel bit depth (8 or 16)
+  int getImageBitDepthPerChannel() const;
+
+  // Returns true if the current image has more than 8 bits per channel (e.g. 16-bit PNG)
+  bool isHighBitDepthImage() const;
 
   // Draw the (current) frame with the given zoom factor
   void drawFrame(QPainter *painter, double zoomFactor, bool drawRawValues);
@@ -141,6 +148,10 @@ protected:
   // Get the pixel value from currentImage. Make sure that currentImage is the correct image.
   QRgb         getPixelVal(const QPoint &pos) const { return getPixelVal(pos.x(), pos.y()); }
   virtual QRgb getPixelVal(int x, int y) const { return currentImage.pixel(x, y); }
+
+  // Get the 16-bit pixel value from currentImage (for high bit depth images).
+  QRgba64         getPixelVal64(const QPoint &pos) const { return getPixelVal64(pos.x(), pos.y()); }
+  virtual QRgba64 getPixelVal64(int x, int y) const { return currentImage.pixelColor(x, y).rgba64(); }
 
   // When slotVideoControlChanged is called, update the controls and return the new selected size
   Size getNewSizeFromControls();

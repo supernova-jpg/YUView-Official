@@ -197,7 +197,8 @@ InfoData playlistItemImageFile::getInfo() const
                                to_string(frame.getFrameSize()),
                                "The video resolution in pixel (width x height)"));
     info.items.append(InfoItem(
-        "Bit depth", std::to_string(frame.getImageBitDepth()), "The bit depth of the image."));
+        "Bit depth per channel", std::to_string(frame.getImageBitDepthPerChannel()),
+        "The bit depth per channel of the image."));
   }
   else if (isLoading())
     info.items.append(

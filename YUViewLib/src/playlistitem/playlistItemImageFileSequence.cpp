@@ -290,8 +290,10 @@ void playlistItemImageFileSequence::slotFrameRequest(int frameIdx, bool)
   if (!fileInfo.exists() || !fileInfo.isFile())
     return;
 
-  // Load the given frame
-  video->requestedFrame     = QImage(imageFiles[frameIdx]);
+  // Load the given frame using QImageReader to preserve 16-bit depth
+  QImageReader reader(imageFiles[frameIdx]);
+  reader.setAutoTransform(true);
+  video->requestedFrame     = reader.read();
   video->requestedFrame_idx = frameIdx;
 }
 
@@ -306,7 +308,9 @@ void playlistItemImageFileSequence::setInternals(const QString &filePath)
 
   // Open frame 0 and set the size of it
   {
-    QImage frame0 = QImage(imageFiles[0]);
+    QImageReader reader(imageFiles[0]);
+    reader.setAutoTransform(true);
+    QImage frame0 = reader.read();
     auto   s      = frame0.size();
     video->setFrameSize(Size(s.width(), s.height()));
   }
